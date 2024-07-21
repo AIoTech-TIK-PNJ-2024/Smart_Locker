@@ -1,8 +1,11 @@
 #include <SPI.h>
 #include <MFRC522.h>
 
-#define SS_PIN 5   // SDA
-#define RST_PIN 0  // RST
+#define SS_PIN 21   // SDA
+#define RST_PIN 22  // RST
+#define BUZZER_PIN 26   // Buzzer
+#define LED_PIN 27      // LED
+#define SOLENOID_PIN 5  // Solenoid Door Lock
  
 MFRC522 rfid(SS_PIN, RST_PIN);
 MFRC522::MIFARE_Key key; 
@@ -12,14 +15,14 @@ void setup() {
   Serial.begin(9600);
   SPI.begin(); 
   rfid.PCD_Init();
-  pinMode(26, OUTPUT); // Buzzer
-  pinMode(27, OUTPUT); // LED
-  pinMode(22, OUTPUT); // Solenoid
+  pinMode(BUZZER_PIN, OUTPUT); // Buzzer
+  pinMode(LED_PIN, OUTPUT); // LED
+  pinMode(SOLENOID_PIN, OUTPUT); // Solenoid
 
   for (byte i = 0; i < 6; i++) {
     key.keyByte[i] = 0xFF;
   }
-  digitalWrite(22, HIGH);
+  digitalWrite(SOLENOID_PIN, HIGH);
 }
  
 void loop() {
@@ -38,13 +41,13 @@ void loop() {
       piccType != MFRC522::PICC_TYPE_MIFARE_4K)
   {
     Serial.println(F("Your tag is not of type MIFARE Classic."));
-    tone(26,1000);
+    tone(BUZZER_PIN,1000);
     delay(200);
-    noTone(26);
+    noTone(BUZZER_PIN);
     delay(200);
-    tone(26,1000);
+    tone(BUZZER_PIN,1000);
     delay(200);
-    noTone(26);
+    noTone(BUZZER_PIN);
     return;
   }
 
@@ -66,12 +69,14 @@ void loop() {
     printDec(rfid.uid.uidByte, rfid.uid.size);
     Serial.println();
    
-    tone(26,1000);
+    tone(BUZZER_PIN,1000);
+    digitalWrite(LED_PIN, HIGH);
     delay(200);
-    noTone(26);
-    digitalWrite(22,LOW);
+    noTone(BUZZER_PIN);
+    digitalWrite(SOLENOID_PIN,LOW);
     delay(3000);
-    digitalWrite(22,HIGH);
+    digitalWrite(SOLENOID_PIN,HIGH);
+    digitalWrite(LED_PIN, LOW);
     return;
 
   } 
@@ -83,12 +88,14 @@ void loop() {
   {
     Serial.println(F("Card read previously."));
 
-    tone(26,1000);
+    tone(BUZZER_PIN,1000);
+    digitalWrite(LED_PIN, HIGH);
     delay(200);
-    noTone(26);
-    digitalWrite(22,LOW);
+    noTone(BUZZER_PIN);
+    digitalWrite(SOLENOID_PIN,LOW);
     delay(3000);
-    digitalWrite(22,HIGH);
+    digitalWrite(SOLENOID_PIN,HIGH);
+    digitalWrite(LED_PIN, LOW);
     return; 
   }
 
