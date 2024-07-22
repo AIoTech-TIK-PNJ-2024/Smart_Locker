@@ -1,161 +1,118 @@
-#include <WiFi.h>
-#include <ThingsBoard.h>
-#include <PubSubClient.h>
-#include <Wire.h>
-#include <LiquidCrystal_I2C.h>
-#include <Keypad.h>
-#include <DHT.h>
+#include <SPI.h>
+#include <MFRC522.h>
 
-// WiFi credentials
-char ssid[] = "POCO M3 Pro 5G";
-char pass[] = "61616161";
+#define SS_PIN 21   // SDA
+#define RST_PIN 22  // RST
+#define BUZZER_PIN 26   // Buzzer
+#define LED_PIN 27      // LED
+#define SOLENOID_PIN 5  // Solenoid Door Lock
+ 
+MFRC522 rfid(SS_PIN, RST_PIN);
+MFRC522::MIFARE_Key key; 
+byte nuidPICC[4];
 
-// ThingsBoard credentials
-#define THINGSBOARD_SERVER "thingsboard.cloud"
-#define TOKEN "AohHjPjG1Pnuyny4e2V4"
+void setup() { 
+  Serial.begin(9600);
+  SPI.begin(); 
+  rfid.PCD_Init();
+  pinMode(BUZZER_PIN, OUTPUT); // Buzzer
+  pinMode(LED_PIN, OUTPUT); // LED
+  pinMode(SOLENOID_PIN, OUTPUT); // Solenoid
 
-// DHT11
-#define DHTPIN 15
-#define DHTTYPE DHT11
-DHT dht(DHTPIN, DHTTYPE);
-
-// MQ2
-#define MQ2PIN 35
-
-// LCD I2C
-LiquidCrystal_I2C lcd(0x27, 20, 4);  // Adjust the address and dimensions as per your LCD module
-
-// Keypad
-const byte ROWS = 4;
-const byte COLS = 3;
-char keys[ROWS][COLS] = {
-  { '1', '2', '3' },
-  { '4', '5', '6' },
-  { '7', '8', '9' },
-  { '*', '0', '#' }
-};
-byte rowPins[ROWS] = { 19, 18, 5, 17 };
-byte colPins[COLS] = { 16, 4, 0 };
-Keypad keypad = Keypad(makeKeymap(keys), rowPins, colPins, ROWS, COLS);
-
-// Variables
-float temperature;
-float humidity;
-String gasInformation;
-String airInformation;
-int unit = 0;  // 0: Celsius, 1: Reaumur, 2: Fahrenheit, 3: Kelvin
-
-// Initialize ThingsBoard client
-WiFiClient espClient;
-ThingsBoard tb(espClient);
-
-void setup() {
-  // Initialize serial monitor
-  Serial.begin(115200);
-
-  // Initialize DHT sensor
-  dht.begin();
-
-  // Initialize LCD
-  lcd.init();
-  lcd.backlight();  // Ensure the backlight is turned on
-
-  // Initialize WiFi
-  WiFi.begin(ssid, pass);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  for (byte i = 0; i < 6; i++) {
+    key.keyByte[i] = 0xFF;
   }
-  Serial.println("WiFi connected");
-
-  // Display initial message
-  lcd.setCursor(0, 0);
-  lcd.print("Initializing...");
-  delay(2000);
+  digitalWrite(SOLENOID_PIN, HIGH);
 }
-
+ 
 void loop() {
-  // Reconnect to ThingsBoard if needed
-  if (!tb.connected()) {
-    // Connect to the ThingsBoard server
-    if (!tb.connect(THINGSBOARD_SERVER, TOKEN)) {
-      Serial.println("Failed to connect to ThingsBoard");
-      return;
-    }
-  }
+  if (!rfid.PICC_IsNewCardPresent())
+    return;
 
-  // Read sensor data
-  temperature = dht.readTemperature();
-  humidity = dht.readHumidity();
+  if (!rfid.PICC_ReadCardSerial())
+    return;
 
-  if (isnan(temperature) || isnan(humidity)) {
-    Serial.println("Failed to read from DHT sensor!");
+  Serial.print(F("PICC type: "));
+  MFRC522::PICC_Type piccType = rfid.PICC_GetType(rfid.uid.sak);
+  Serial.println(rfid.PICC_GetTypeName(piccType));
+
+  if (piccType != MFRC522::PICC_TYPE_MIFARE_MINI &&  
+      piccType != MFRC522::PICC_TYPE_MIFARE_1K &&
+      piccType != MFRC522::PICC_TYPE_MIFARE_4K)
+  {
+    Serial.println(F("Your tag is not of type MIFARE Classic."));
+    tone(BUZZER_PIN,1000);
+    delay(200);
+    noTone(BUZZER_PIN);
+    delay(200);
+    tone(BUZZER_PIN,1000);
+    delay(200);
+    noTone(BUZZER_PIN);
     return;
   }
 
-  int gas = analogRead(MQ2PIN);
+  if( rfid.uid.uidByte[0] != nuidPICC[0] || 
+      rfid.uid.uidByte[1] != nuidPICC[1] || 
+      rfid.uid.uidByte[2] != nuidPICC[2] || 
+      rfid.uid.uidByte[3] != nuidPICC[3] )
+  {
+    Serial.println(F("A new card has been detected."));
 
-  // Check keypad input
-  char key = keypad.getKey();
-  if (key) {
-    switch (key) {
-      case '1': unit = 0; break;  // Celsius
-      case '2': unit = 1; break;  // Reaumur
-      case '3': unit = 2; break;  // Fahrenheit
-      case '4': unit = 3; break;  // Kelvin
+    for (byte i = 0; i < 4; i++) {
+      nuidPICC[i] = rfid.uid.uidByte[i];
     }
+
+    Serial.print(F("In hex: "));
+    printHex(rfid.uid.uidByte, rfid.uid.size);
+    Serial.println();
+    Serial.print(F("In dec: "));
+    printDec(rfid.uid.uidByte, rfid.uid.size);
+    Serial.println();
+   
+    tone(BUZZER_PIN,1000);
+    digitalWrite(LED_PIN, HIGH);
+    delay(200);
+    noTone(BUZZER_PIN);
+    digitalWrite(SOLENOID_PIN,LOW);
+    delay(3000);
+    digitalWrite(SOLENOID_PIN,HIGH);
+    digitalWrite(LED_PIN, LOW);
+    return;
+
+  } 
+  
+  if( rfid.uid.uidByte[0] == nuidPICC[0] || 
+      rfid.uid.uidByte[1] == nuidPICC[1] || 
+      rfid.uid.uidByte[2] == nuidPICC[2] || 
+      rfid.uid.uidByte[3] == nuidPICC[3] ) 
+  {
+    Serial.println(F("Card read previously."));
+
+    tone(BUZZER_PIN,1000);
+    digitalWrite(LED_PIN, HIGH);
+    delay(200);
+    noTone(BUZZER_PIN);
+    digitalWrite(SOLENOID_PIN,LOW);
+    delay(3000);
+    digitalWrite(SOLENOID_PIN,HIGH);
+    digitalWrite(LED_PIN, LOW);
+    return; 
   }
 
-  // Convert temperature
-  float displayTemp = temperature;
-  switch (unit) {
-    case 1: displayTemp = temperature * 0.8; break;         // Reaumur
-    case 2: displayTemp = temperature * 9 / 5 + 32; break;  // Fahrenheit
-    case 3: displayTemp = temperature + 273.15; break;      // Kelvin
+  rfid.PICC_HaltA();
+  rfid.PCD_StopCrypto1();
+}
+
+void printHex(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(buffer[i] < 0x10 ? " 0" : " ");
+    Serial.print(buffer[i], HEX);
   }
+}
 
-  // Update LCD
-  lcd.clear();
-  lcd.setCursor(0, 0);
-  lcd.print("Temp: ");
-  lcd.print(displayTemp);
-  switch (unit) {
-    case 0: lcd.print(" C"); break;  // Celsius
-    case 1: lcd.print(" R"); break;  // Reaumur
-    case 2: lcd.print(" F"); break;  // Fahrenheit
-    case 3: lcd.print(" K"); break;  // Kelvin
+void printDec(byte *buffer, byte bufferSize) {
+  for (byte i = 0; i < bufferSize; i++) {
+    Serial.print(' ');
+    Serial.print(buffer[i], DEC);
   }
-
-  lcd.setCursor(0, 1);
-  lcd.print("Humidity: ");
-  lcd.print(humidity);
-  lcd.print(" %");
-
-  lcd.setCursor(0, 2);
-  lcd.print("Gas: ");
-  if (gas >= 2600) {
-    lcd.print("Detected");
-    gasInformation = "Detected";
-  } else {
-    lcd.print("Not Detected");
-    gasInformation = "Not Detected";
-  }
-
-  lcd.setCursor(0, 3);
-  lcd.print("Air Quality: ");
-  if (temperature > 36 || humidity > 80 || gas >= 2600) {
-    lcd.print("Bad");
-    airInformation = "Bad";
-  } else {
-    lcd.print("Good");
-    airInformation = "Good";
-  }
-
-  // Update ThingsBoard
-  tb.sendTelemetryFloat("humidity", humidity);
-  tb.sendTelemetryFloat("temperature", temperature);
-  tb.sendTelemetryString("gasInformation", gasInformation.c_str());
-  tb.sendTelemetryString("airInformation", airInformation.c_str());
-
-  delay(1000);  // Update interval
 }
